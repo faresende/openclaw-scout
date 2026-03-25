@@ -1,101 +1,133 @@
 ---
 name: openclaw-scout
-description: Daily scout of Reddit and other communities for OpenClaw tips, tricks, new skills, config optimizations, and automation patterns. Scans subreddits, filters for actionable items, and delivers a concise report. Use when you want to stay current on the OpenClaw ecosystem, or set up as a daily cron job.
+description: Daily scout of Reddit, Hacker News, GitHub, and Discord for OpenClaw tips, skills, config optimizations, and automation patterns. Scans multiple sources, deduplicates against your setup and past reports, and delivers a concise actionable report. Use on demand or as a daily cron job.
 ---
 
 # OpenClaw Scout
 
-Scan Reddit and AI agent communities for OpenClaw improvements, then deliver a concise actionable report.
+Scan communities for OpenClaw improvements. Filter for signal. Deliver actionable reports. Learn from past runs.
 
-## When to Use
+## Sources (in priority order)
 
-- As a daily cron job (recommended: 8PM local time)
-- On demand when user asks to check for OpenClaw news/tips
-- After an OpenClaw update to see what the community is doing with new features
+1. **Reddit** — r/openclaw, r/openclawsetup, r/openclawusecases, r/LocalLLaMA, r/selfhosted
+2. **Hacker News** — AI agent, automation, and self-hosted topics
+3. **GitHub** — Trending repos tagged `openclaw`, `ai-agent`, `llm-tools`
+4. **Discord** — OpenClaw community (https://discord.com/invite/clawd) #showcase and #tips channels
 
 ## Workflow
 
-### Step 1: Scan Sources
+### Step 1: Gather
 
-Search these subreddits for posts from the last 24-48h:
+**Reddit** (use `.json` endpoints for structured data, no auth needed):
+```bash
+# Fetch recent posts as JSON — no API key required
+curl -s "https://www.reddit.com/r/openclaw/new.json?limit=25" -H "User-Agent: openclaw-scout/1.0"
+curl -s "https://www.reddit.com/r/openclawsetup/new.json?limit=15" -H "User-Agent: openclaw-scout/1.0"
+```
+Parse `data.children[].data` for `title`, `selftext`, `url`, `created_utc`, `score`, `num_comments`.
+Only process posts from the last 48 hours. Skip posts with score < 3 (noise).
+
+**Hacker News** (API, no auth):
+```bash
+# Search for recent OpenClaw / AI agent posts
+curl -s "https://hn.algolia.com/api/v1/search_by_date?query=openclaw&tags=story&numericFilters=created_at_i>$(date -v-2d +%s)"
+curl -s "https://hn.algolia.com/api/v1/search_by_date?query=ai+agent+automation&tags=story&numericFilters=created_at_i>$(date -v-1d +%s)"
+```
+
+**GitHub Trending** (web scrape, no auth):
+```
+web_fetch https://github.com/trending?since=daily&spoken_language_code=en
+```
+Look for repos mentioning openclaw, agent framework, llm tools, mcp.
+
+**Discord** (if browser tool available):
+Check #showcase and #tips in the OpenClaw Discord for pinned or high-reaction posts.
+
+**Fallback:** If `.json` endpoints fail (rate limited), fall back to `web_search` queries:
+```
+site:reddit.com/r/openclaw (last 24h)
+site:news.ycombinator.com openclaw OR "ai agent" automation
+```
+
+### Step 2: Read and Evaluate
+
+For posts with high signal (score > 10, or detailed writeup, or links to tools/repos):
+- `web_fetch` the full post + top comments
+- For linked GitHub repos: read the README
+- For linked tools: check if actively maintained (last commit < 30 days)
+
+**Score each item 1-5:**
+- Impact on daily workflow (1-5)
+- Implementation effort (invert: 5=quick, 1=big project)
+- Novelty vs what the user already has (5=totally new, 1=already doing it)
+
+Only report items scoring >= 8 total.
+
+### Step 3: Deduplicate
+
+Before including an item, check two things:
+
+**A) Already in our setup?**
+Read the user's cron jobs (`cron list`) and skim their config. If we already do something equivalent, skip it or note "you already have this, but their approach to X is different."
+
+**B) Already reported?**
+Check `memory/reddit-scout-log.md` for past entries. Don't recommend the same tool/pattern twice unless there's a meaningful update (new version, new approach).
+
+### Step 4: Compose Report
 
 ```
-site:reddit.com/r/openclaw
-site:reddit.com/r/openclawsetup
-site:reddit.com/r/openclawusecases
-site:reddit.com openclaw agent automation tips
-site:reddit.com AI agent cron workflow self-hosted
-```
+🔭 OpenClaw Scout Report — [Day, Mon DD]
 
-Also check r/LocalLLaMA, r/selfhosted, r/ChatGPTCoding for relevant agent patterns.
+Scanned: [sources checked, with post counts]
 
-Use `web_search` for discovery, then `web_fetch` on interesting posts to get full content + top comments.
+**1. [Title]** ⭐ [score/15]
+[What it is — one line]
+[Why it matters for your setup — one line, specific]
+⚡ Effort: [quick/medium/big]
+🔗 [source URL]
 
-### Step 2: Filter for Signal
-
-**Include:**
-- New skills or integrations people built
-- Config optimizations (compaction, pruning, caching, model routing)
-- Creative cron job / automation patterns
-- Multi-agent architectures
-- Cost-saving tricks (model selection, local models, caching)
-- Tools or CLIs that complement OpenClaw
-- Workflow patterns transferable to the user's setup
-
-**Exclude:**
-- Basic setup questions
-- Bug reports without workarounds
-- Posts with no actionable takeaway
-- Anything the user's setup already does (check cron jobs and config)
-
-### Step 3: Compose Report
-
-Format as a single message:
-
-```
-🔭 OpenClaw Scout Report — [date]
-
-Scanned r/openclaw, r/openclawsetup, r/LocalLLaMA + related. Here's what stood out:
-
-**1. [Title]**
-[What it is, one line]
-[Why it matters for your setup, one line]
-⚡ Effort: [quick/medium/big] ([brief justification])
-🔗 [source link]
-
-**2. [Title]**
 ...
 
-📊 Overall: [one-line assessment of the day's findings]
+📊 [one-line assessment: "Strong day" / "Quiet, nothing actionable" / etc.]
 ```
 
-Target 3-5 items. Prioritize by impact. Be specific about implementation, not vague.
+Rules:
+- 3-5 items max. Quality over quantity.
+- If nothing scores >= 8, say so honestly. Don't pad the report.
+- Be specific about implementation: "add this to your SOUL.md" not "consider adopting this pattern"
+- Include the actual command/config snippet when possible
 
-### Step 4: Log
+### Step 5: Log
 
-Append a brief entry to `memory/reddit-scout-log.md` (create if needed):
+Append to `memory/reddit-scout-log.md`:
 
+```markdown
+## YYYY-MM-DD ([Day])
+**Sources:** [list with post counts, e.g. "r/openclaw (12), HN (3), GH trending (1)"]
+**Items reported:** [count]
+1. [Title] — [one-line summary] — [status: reported/skipped-already-have/skipped-low-signal]
+**Quiet?** [yes/no]
 ```
-## [YYYY-MM-DD]
-- [item 1 title]: [one-line summary]
-- [item 2 title]: [one-line summary]
-- Nothing notable (if quiet day)
+
+### Step 6: Track Actions (optional)
+
+If the user acts on an item (installs a skill, changes config, etc.), update the log entry:
+```
+1. predicate-claw — zero-trust tool auth — ✅ installed 2026-03-28
 ```
 
-This prevents recommending the same thing twice.
+This prevents re-recommending and builds a history of what worked.
 
 ## Cron Setup
 
-To run daily at 8PM:
-
 ```json
 {
-  "name": "reddit-openclaw-scout",
-  "schedule": { "kind": "cron", "expr": "0 20 * * *", "tz": "USERS_TIMEZONE" },
+  "name": "openclaw-scout",
+  "schedule": { "kind": "cron", "expr": "0 20 * * *", "tz": "USER_TIMEZONE" },
   "sessionTarget": "isolated",
   "payload": {
     "kind": "agentTurn",
-    "message": "Run the OpenClaw Scout skill. Scan Reddit for OpenClaw tips and deliver the report to the user.",
+    "message": "Run the openclaw-scout skill. Check all sources, deduplicate against setup and past reports, deliver the report.",
     "model": "anthropic/claude-sonnet-4-6",
     "timeoutSeconds": 180
   },
@@ -103,15 +135,15 @@ To run daily at 8PM:
 }
 ```
 
-Adjust:
-- `tz` to the user's timezone
-- `model` to whatever's available (Sonnet works well, Haiku is too shallow for reading Reddit threads)
-- Delivery mode: `announce` sends the report to chat, `none` just logs it
+**Model guidance:**
+- Sonnet or equivalent: good balance of reading comprehension and cost
+- Haiku: too shallow, misses signal in long threads
+- Opus: overkill for this task
 
-## Notes
+**Timezone:** Set to your local timezone so reports arrive at a reasonable hour.
 
-- The skill uses `web_search` and `web_fetch`, both available by default in OpenClaw
-- No API keys needed (Reddit public pages)
-- Reddit `.json` trick: append `.json` to any Reddit URL for structured data (avoids HTML parsing)
-- If the user wants Telegram/Discord delivery from the cron, set the delivery channel accordingly
-- Model recommendation: Sonnet for quality, Haiku won't extract enough signal from long threads
+## Customization
+
+**Change sources:** Edit Step 1 to add/remove subreddits or add other platforms.
+**Change threshold:** Lower the score cutoff from 8 to 6 for more items, raise to 10 for only bangers.
+**Change frequency:** Run weekly instead of daily if your setup is stable and you don't want noise.
